@@ -1,0 +1,10 @@
+{
+  "description": "Provides a responsive chatbot that answers prospective IFB students' questions about course edital details with quick, clear, and accessible guidance.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
