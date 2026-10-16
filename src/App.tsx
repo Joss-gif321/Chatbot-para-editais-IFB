@@ -1,50 +1,61 @@
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react"
+import type { Edital } from "./types/api"
+import { getEditais } from "./services/api"
+import { processarMensagemBot } from "./services/chatbotService"
 
 type Message = {
-  id: number
+  id: number | string
   author: "bot" | "user"
   content: string
   time: string
+  isApiResult?: boolean
+  isError?: boolean
 }
 
-const notices = [
+interface NoticeOption {
+  value: string
+  short: string
+  label: string
+  fullLabel: string
+  pdfUrl: string
+}
+
+const fallbackNotices: NoticeOption[] = [
   {
-    value: "tecnicos",
-    short: "Edital IFB 01/2026",
-    label: "Edital IFB 01/2026 — Cursos Técnicos",
-    fullLabel: "Cursos Técnicos Subsequentes e Integrados",
-    pdfUrl:
-      "https://www.ifb.edu.br/processos-seletivos/editais/tecnicos-2026.pdf",
+    value: "edital-2026-001",
+    short: "Edital 001/2026",
+    label: "Edital 001/2026 — Cursos Técnicos Gratuitos",
+    fullLabel: "Processo seletivo para cursos técnicos gratuitos",
+    pdfUrl: "https://www.ifb.edu.br/processos-seletivos/editais",
   },
   {
-    value: "graduacao",
-    short: "Edital IFB 02/2026",
-    label: "Edital IFB 02/2026 — Graduação",
-    fullLabel: "Cursos de Graduação e Licenciatura",
-    pdfUrl:
-      "https://www.ifb.edu.br/processos-seletivos/editais/graduacao-2026.pdf",
+    value: "edital-2026-002",
+    short: "Edital 002/2026",
+    label: "Edital 002/2026 — Qualificação Profissional",
+    fullLabel: "Seleção para cursos de qualificação profissional",
+    pdfUrl: "https://www.ifb.edu.br/processos-seletivos/editais",
   },
 ]
 
 const quickQuestions = [
   {
     label: "Documentos necessários",
-    question: "Quais são os documentos necessários?",
+    question: "Quais são os documentos necessários para a matrícula?",
     icon: <DocumentIcon />,
   },
   {
     label: "Prazo de inscrição",
-    question: "Até quando vão as inscrições do IFB?",
+    question: "Até quando vão as inscrições e qual o cronograma?",
     icon: <CalendarIcon />,
   },
   {
-    label: "Isenção de taxa",
-    question: "Como solicitar isenção de taxa?",
+    label: "Cursos e vagas",
+    question: "Quais são os cursos oferecidos e a quantidade de vagas?",
     icon: <TicketIcon />,
   },
   {
-    label: "Cotas e ações afirmativas",
-    question: "Como funcionam as cotas e ações afirmativas no IFB?",
+    label: "Consultar inscrição",
+    question: "Gostaria de consultar o status da minha inscrição. Telefone: (11) 90000-0001",
     icon: <PeopleIcon />,
   },
 ]
@@ -54,13 +65,6 @@ function getTime() {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date())
-}
-
-function normalize(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
 }
 
 function IFBMark({ compact = false }: { compact?: boolean }) {
@@ -86,6 +90,16 @@ function BotAvatar() {
   )
 }
 
+function renderFormattedText(text: string) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g)
+  return parts.map((part, index) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={index}>{part.slice(2, -2)}</strong>
+    }
+    return part
+  })
+}
+
 function MessageContent({ content }: { content: string }) {
   const lines = content.split("\n")
 
@@ -93,12 +107,14 @@ function MessageContent({ content }: { content: string }) {
     <div className="message-copy">
       {lines.map((line, index) => {
         const isBullet = line.startsWith("• ")
+        const cleanLine = isBullet ? line.slice(2) : line
+
         return (
           <p
             className={isBullet ? "message-bullet" : ""}
-            key={`${line}-${index}`}
+            key={`${line.slice(0, 15)}-${index}`}
           >
-            {isBullet ? line.slice(2) : line || "\u00A0"}
+            {cleanLine ? renderFormattedText(cleanLine) : "\u00A0"}
           </p>
         )
       })}
@@ -194,52 +210,59 @@ function TrashIcon() {
   )
 }
 
-function createBotReply(text: string, noticeValue: string) {
-  const value = normalize(text)
-  const notice =
-    notices.find((item) => item.value === noticeValue) ?? notices[0]
-  const context = `${notice.short} — ${notice.fullLabel}`
-
-  if (value.includes("documento")) {
-    return `Para o ${context}, separe os seguintes documentos:\n\n• Documento oficial de identificação com foto\n• CPF do candidato\n• Comprovante de escolaridade exigido para o curso\n• Comprovante de residência atualizado\n• Documentação específica para cotas, quando aplicável\n\nOs arquivos devem estar legíveis e ser enviados em formato PDF no ato da inscrição.`
-  }
-
-  if (
-    value.includes("inscricao") ||
-    value.includes("data") ||
-    value.includes("prazo")
-  ) {
-    return `Confira o cronograma simulado do ${notice.short}:\n\n• Inscrições on-line: 12/01 a 06/02/2026\n• Solicitação de isenção: 12/01 a 23/01/2026\n• Resultado preliminar: 20/02/2026\n• Resultado final e convocação: 27/02/2026\n\nRecomendamos não deixar a inscrição para o último dia.`
-  }
-
-  if (value.includes("isencao")) {
-    return `A isenção da taxa poderá ser solicitada de 12/01 a 23/01/2026, durante a inscrição.\n\nÉ necessário informar o NIS válido e estar inscrito no CadÚnico, conforme os critérios do edital. O pedido passa por análise e o resultado será publicado na página do processo seletivo. Se o pedido for indeferido, será possível pagar a taxa dentro do prazo indicado.`
-  }
-
-  if (value.includes("cota") || value.includes("acao afirmativa")) {
-    return `O IFB reserva vagas conforme a Lei de Cotas para candidatos que cursaram integralmente o ensino médio em escola pública, com recortes de renda, pertencimento étnico-racial, quilombola e pessoa com deficiência.\n\nNa inscrição, escolha a modalidade correta e confira a documentação comprobatória exigida. A ausência de comprovação pode levar à mudança para ampla concorrência, conforme as regras do edital.`
-  }
-
-  return "Para essa dúvida específica, recomendamos consultar o documento completo no portal oficial (ifb.edu.br). Quer tentar um dos atalhos rápidos?"
-}
-
 const initialBotMessage: Message = {
   id: 1,
   author: "bot",
   content:
-    "Olá! Sou o Assistente Virtual de Editais do IFB. Estou aqui para ajudar você com informações sobre inscrições, documentos, prazos, isenção de taxa e cotas.\n\nComo posso ajudar hoje?",
+    "Olá! Sou o Assistente Virtual de Editais do IFB integrado à API em tempo real. Estou pronto para ajudar você com dúvidas sobre cursos, vagas, inscrições, prazos e consulta de status de candidato.\n\nComo posso ajudar hoje?",
   time: getTime(),
 }
 
 export default function App() {
-  const [selectedNotice, setSelectedNotice] = useState(notices[0].value)
+  const [editais, setEditais] = useState<Edital[]>([])
+  const [noticesList, setNoticesList] = useState<NoticeOption[]>(fallbackNotices)
+  const [selectedNotice, setSelectedNotice] = useState<string>(fallbackNotices[0].value)
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<Message[]>([initialBotMessage])
   const [isTyping, setIsTyping] = useState(false)
   const endRef = useRef<HTMLDivElement>(null)
 
+  // Carrega os editais reais da API ao inicializar
+  useEffect(() => {
+    let isMounted = true
+
+    async function carregarDadosApi() {
+      try {
+        const dadosEditais = await getEditais()
+
+        if (!isMounted) return
+
+        if (dadosEditais && dadosEditais.length > 0) {
+          setEditais(dadosEditais)
+          const options: NoticeOption[] = dadosEditais.map((edital) => ({
+            value: edital.id,
+            short: `Edital ${edital.número}`,
+            label: `Edital ${edital.número} — ${edital.título}`,
+            fullLabel: edital.título,
+            pdfUrl: "https://www.ifb.edu.br/processos-seletivos/editais",
+          }))
+          setNoticesList(options)
+          setSelectedNotice(options[0].value)
+        }
+      } catch (error) {
+        console.error("Falha ao inicializar dados da API:", error)
+      }
+    }
+
+    carregarDadosApi()
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
+
   const activeNotice =
-    notices.find((notice) => notice.value === selectedNotice) ?? notices[0]
+    noticesList.find((notice) => notice.value === selectedNotice) ?? noticesList[0]
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
@@ -256,7 +279,7 @@ export default function App() {
     ])
   }
 
-  function sendMessage(text: string) {
+  async function sendMessage(text: string) {
     const cleanText = text.trim()
     if (!cleanText || isTyping) return
 
@@ -271,25 +294,40 @@ export default function App() {
     setInput("")
     setIsTyping(true)
 
-    const botResponseText = createBotReply(cleanText, selectedNotice)
-    // Simula um delay natural de leitura, digitação e carregamento (entre 900ms e 1600ms)
-    const simulatedDelay = Math.min(
-      Math.max(botResponseText.length * 6, 900),
-      1600,
-    )
+    try {
+      // Processa a mensagem consultando a API via axios
+      const resposta = await processarMensagemBot(
+        cleanText,
+        selectedNotice,
+        editais
+      )
 
-    window.setTimeout(() => {
       setMessages((current) => [
         ...current,
         {
           id: Date.now() + 1,
           author: "bot",
-          content: botResponseText,
+          content: resposta.content,
           time: getTime(),
+          isApiResult: resposta.isApiResult,
         },
       ])
+    } catch (error) {
+      console.error("Erro ao processar resposta do bot:", error)
+      setMessages((current) => [
+        ...current,
+        {
+          id: Date.now() + 1,
+          author: "bot",
+          content:
+            "Desculpe, ocorreu um erro ao consultar os dados da API em tempo real. Por favor, tente novamente em instantes.",
+          time: getTime(),
+          isError: true,
+        },
+      ])
+    } finally {
       setIsTyping(false)
-    }, simulatedDelay)
+    }
   }
 
   function handleSubmit(event: FormEvent) {
@@ -327,19 +365,6 @@ export default function App() {
                 <h1>Assistente de Editais</h1>
               </div>
             </div>
-
-            <div
-              className="online-status"
-              aria-label="Bot IFB online, resposta instantânea"
-            >
-              <span className="status-pulse">
-                <span />
-              </span>
-              <span className="online-status-info">
-                <strong>Bot IFB Online</strong>
-                <small>Resposta instantânea</small>
-              </span>
-            </div>
           </div>
 
           <div className="header-toolbar">
@@ -351,7 +376,7 @@ export default function App() {
                   value={selectedNotice}
                   onChange={(event) => setSelectedNotice(event.target.value)}
                 >
-                  {notices.map((notice) => (
+                  {noticesList.map((notice) => (
                     <option key={notice.value} value={notice.value}>
                       {notice.label}
                     </option>
@@ -368,10 +393,10 @@ export default function App() {
                 href={activeNotice.pdfUrl}
                 rel="noreferrer"
                 target="_blank"
-                title="Abrir PDF oficial do edital"
+                title="Abrir página oficial do edital"
               >
                 <FilePdfIcon />
-                <span>Ver PDF do Edital</span>
+                <span>Página do Edital</span>
               </a>
 
               <button
@@ -406,7 +431,7 @@ export default function App() {
             target="_blank"
           >
             <FilePdfIcon />
-            <span>PDF Oficial</span>
+            <span>Portal IFB</span>
           </a>
         </div>
 
@@ -427,7 +452,14 @@ export default function App() {
                   className={`message-bubble message-bubble--${message.author}`}
                 >
                   {message.author === "bot" && (
-                    <span className="message-author">Assistente IFB</span>
+                    <span className="message-author">
+                      Assistente IFB
+                      {message.isApiResult && (
+                        <small style={{ marginLeft: "6px", opacity: 0.75, fontSize: "10px" }}>
+                          (Dados da API)
+                        </small>
+                      )}
+                    </span>
                   )}
                   <MessageContent content={message.content} />
                   <span className="message-meta">
@@ -447,12 +479,12 @@ export default function App() {
                 <BotAvatar />
                 <div
                   className="typing-bubble"
-                  aria-label="Assistente está digitando..."
+                  aria-label="Assistente está consultando a API..."
                 >
                   <span className="typing-dot" />
                   <span className="typing-dot" />
                   <span className="typing-dot" />
-                  <span className="typing-label">Consultando edital...</span>
+                  <span className="typing-label">Consultando API do edital...</span>
                 </div>
               </div>
             )}
@@ -464,7 +496,7 @@ export default function App() {
           <div className="quick-section">
             <div className="quick-title">
               <SparkIcon />
-              <span>Perguntas frequentes</span>
+              <span>Perguntas frequentes e atalhos da API</span>
               <span className="quick-line" />
             </div>
             <div
@@ -488,14 +520,14 @@ export default function App() {
 
           <form className="composer" onSubmit={handleSubmit}>
             <label className="sr-only" htmlFor="chat-input">
-              Digite sua dúvida sobre o edital do IFB
+              Digite sua dúvida ou telefone para consulta...
             </label>
             <input
               autoComplete="off"
               id="chat-input"
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={handleInputKeyDown}
-              placeholder="Digite sua dúvida sobre o edital do IFB..."
+              placeholder="Digite sua dúvida ou telefone (ex: 11 90000-0001)..."
               type="text"
               value={input}
             />
@@ -511,8 +543,8 @@ export default function App() {
           </form>
 
           <p className="disclaimer">
-            As respostas são informativas. Confirme os dados no edital oficial
-            em{" "}
+            Respostas obtidas em tempo real da API{" "}
+            <strong>desafio-chatbot-api.onrender.com</strong>. Confirme sempre no edital oficial em{" "}
             <a href="https://www.ifb.edu.br/" rel="noreferrer" target="_blank">
               ifb.edu.br
             </a>
