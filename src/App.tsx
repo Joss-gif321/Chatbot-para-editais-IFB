@@ -1,5 +1,6 @@
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react"
 import EditalRegistration from "./EditalRegistration"
+import Login from "./Login"
 import type { Edital, NoDecisao } from "./types/api"
 import { getEditais } from "./services/api"
 import { getMensagemInicialEdital, processarMensagemBot } from "./services/chatbotService"
@@ -222,6 +223,15 @@ function TrashIcon() {
   )
 }
 
+function LogoutIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M10 17l5-5-5-5M15 12H3" />
+      <path d="M12 3h7a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-7" />
+    </svg>
+  )
+}
+
 function createInitialBotMessage(edital?: Edital | null): Message {
   return {
     id: Date.now(),
@@ -231,7 +241,13 @@ function createInitialBotMessage(edital?: Edital | null): Message {
   }
 }
 
-export default function App() {
+function AuthenticatedApp({
+  adminName,
+  onLogout,
+}: {
+  adminName: string
+  onLogout: () => void
+}) {
   const [editais, setEditais] = useState<Edital[]>([])
   const [noticesList, setNoticesList] = useState<NoticeOption[]>(fallbackNotices)
   const [selectedNotice, setSelectedNotice] = useState<string>(fallbackNotices[0].value)
@@ -411,6 +427,19 @@ export default function App() {
                 <span className="eyebrow">Processo seletivo 2026</span>
                 <h1>Assistente de Editais</h1>
               </div>
+            </div>
+            <div className="header-session">
+              <span>Olá, {adminName}</span>
+              <button
+                aria-label="Sair da conta"
+                className="header-btn header-btn--logout"
+                onClick={onLogout}
+                title="Sair da conta"
+                type="button"
+              >
+                <LogoutIcon />
+                <span>Sair</span>
+              </button>
             </div>
           </div>
 
@@ -624,4 +653,14 @@ export default function App() {
       </section>
     </main>
   )
+}
+
+export default function App() {
+  const [adminName, setAdminName] = useState<string | null>(null)
+
+  if (adminName === null) {
+    return <Login onAuthenticated={setAdminName} />
+  }
+
+  return <AuthenticatedApp adminName={adminName} onLogout={() => setAdminName(null)} />
 }

@@ -208,6 +208,25 @@ export async function atualizarContato(
 // ============================================================================
 
 /**
+ * Valida as credenciais de um administrador cadastrado na API
+ */
+export async function autenticarAdmin(email: string, senha: string): Promise<string | null> {
+  try {
+    const response = await apiClient.get<Admin[]>("/admins", {
+      params: { email: email.trim() },
+    })
+    const emailNormalizado = email.trim().toLowerCase()
+    const admin = response.data.find((item) =>
+      item.email.trim().toLowerCase() === emailNormalizado && item.senha === senha
+    )
+    return admin?.nome ?? null
+  } catch (error) {
+    console.error("[API] Erro ao autenticar administrador:", error)
+    throw new Error(formatarErroApi(error))
+  }
+}
+
+/**
  * Verifica a saúde/conectividade da API
  */
 export async function checkApiHealth(): Promise<boolean> {
@@ -231,6 +250,7 @@ export const api = {
   getContatoByTelefone,
   cadastrarContato,
   atualizarContato,
+  autenticarAdmin,
   checkApiHealth,
 }
 
