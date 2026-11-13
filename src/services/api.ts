@@ -6,6 +6,7 @@ import type {
   BuscarEditaisParams,
   Contato,
   CriarContatoInput,
+  CriarEditalInput,
   Edital,
 } from "../types/api"
 
@@ -81,6 +82,32 @@ export async function getEditalById(id: string): Promise<Edital> {
     return response.data
   } catch (error) {
     console.error(`[API] Erro ao buscar edital ${id}:`, error)
+    throw new Error(formatarErroApi(error))
+  }
+}
+
+/**
+ * Cadastra um edital com a mensagem inicial e sua árvore de decisão
+ */
+export async function cadastrarEdital(dados: CriarEditalInput): Promise<Edital> {
+  try {
+    const response = await apiClient.post<Edital>("/editais", dados)
+    return response.data
+  } catch (error) {
+    console.error("[API] Erro ao cadastrar edital:", error)
+    throw new Error(formatarErroApi(error))
+  }
+}
+
+/**
+ * Atualiza um edital existente e seu fluxo de mensagens
+ */
+export async function atualizarEdital(id: string, dados: CriarEditalInput): Promise<Edital> {
+  try {
+    const response = await apiClient.put<Edital>(`/editais/${encodeURIComponent(id)}`, dados)
+    return response.data
+  } catch (error) {
+    console.error(`[API] Erro ao atualizar edital ${id}:`, error)
     throw new Error(formatarErroApi(error))
   }
 }
@@ -198,6 +225,7 @@ export async function checkApiHealth(): Promise<boolean> {
 export const api = {
   getEditais,
   getEditalById,
+  cadastrarEdital,
   searchEditais,
   getContatos,
   getContatoByTelefone,

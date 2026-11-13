@@ -1,7 +1,8 @@
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from "react"
-import type { Edital } from "./types/api"
+import EditalRegistration from "./EditalRegistration"
+import type { Edital, NoDecisao } from "./types/api"
 import { getEditais } from "./services/api"
-import { processarMensagemBot } from "./services/chatbotService"
+import { getMensagemInicialEdital, processarMensagemBot } from "./services/chatbotService"
 
 type Message = {
   id: number | string
@@ -69,16 +70,11 @@ function getTime() {
 
 function IFBMark({ compact = false }: { compact?: boolean }) {
   return (
-    <div
+    <img
+      alt="IFB"
       className={`ifb-mark ${compact ? "ifb-mark--compact" : ""}`}
-      aria-label="IFB"
-      role="img"
-    >
-      <span className="ifb-dot" />
-      {Array.from({ length: 8 }).map((_, index) => (
-        <span className="ifb-block" key={index} />
-      ))}
-    </div>
+      src="/logo.png"
+    />
   )
 }
 
@@ -135,6 +131,22 @@ function ChevronIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="m7 10 5 5 5-5" />
+    </svg>
+  )
+}
+
+function AddIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  )
+}
+
+function EditIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m14 5 5 5M4 20l4.5-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20Z" />
     </svg>
   )
 }
@@ -210,12 +222,13 @@ function TrashIcon() {
   )
 }
 
-const initialBotMessage: Message = {
-  id: 1,
-  author: "bot",
-  content:
-    "Olá! Sou o Assistente Virtual de Editais do IFB integrado à API em tempo real. Estou pronto para ajudar você com dúvidas sobre cursos, vagas, inscrições, prazos e consulta de status de candidato.\n\nComo posso ajudar hoje?",
-  time: getTime(),
+function createInitialBotMessage(edital?: Edital | null): Message {
+  return {
+    id: Date.now(),
+    author: "bot",
+    content: getMensagemInicialEdital(edital),
+    time: getTime(),
+  }
 }
 
 export default function App() {
@@ -223,8 +236,11 @@ export default function App() {
   const [noticesList, setNoticesList] = useState<NoticeOption[]>(fallbackNotices)
   const [selectedNotice, setSelectedNotice] = useState<string>(fallbackNotices[0].value)
   const [input, setInput] = useState("")
-  const [messages, setMessages] = useState<Message[]>([initialBotMessage])
+  const [messages, setMessages] = useState<Message[]>([createInitialBotMessage()])
   const [isTyping, setIsTyping] = useState(false)
+  const [isRegisteringEdital, setIsRegisteringEdital] = useState(false)
+  const [editingEdital, setEditingEdital] = useState<Edital | null>(null)
+  const [decisionPath, setDecisionPath] = useState<NoDecisao[]>([])
   const endRef = useRef<HTMLDivElement>(null)
 
   // Carrega os editais reais da API ao inicializar
@@ -240,7 +256,7 @@ export default function App() {
         if (dadosEditais && dadosEditais.length > 0) {
           setEditais(dadosEditais)
           const options: NoticeOption[] = dadosEditais.map((edital) => ({
-            value: edital.id,
+            value: String(edital.id),
             short: `Edital ${edital.número}`,
             label: `Edital ${edital.número} — ${edital.título}`,
             fullLabel: edital.título,
@@ -263,6 +279,12 @@ export default function App() {
 
   const activeNotice =
     noticesList.find((notice) => notice.value === selectedNotice) ?? noticesList[0]
+  const activeEdital = editais.find((edital) => String(edital.id) === selectedNotice) ?? null
+
+  useEffect(() => {
+    setDecisionPath(activeEdital?.arvore_decisao ? [activeEdital.arvore_decisao] : [])
+    setMessages([createInitialBotMessage(activeEdital)])
+  }, [selectedNotice, activeEdital])
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
@@ -270,13 +292,8 @@ export default function App() {
 
   function handleClearChat() {
     if (isTyping) return
-    setMessages([
-      {
-        ...initialBotMessage,
-        id: Date.now(),
-        time: getTime(),
-      },
-    ])
+    setDecisionPath(activeEdital?.arvore_decisao ? [activeEdital.arvore_decisao] : [])
+    setMessages([createInitialBotMessage(activeEdital)])
   }
 
   async function sendMessage(text: string) {
@@ -299,8 +316,13 @@ export default function App() {
       const resposta = await processarMensagemBot(
         cleanText,
         selectedNotice,
-        editais
+        editais,
+        decisionPath
       )
+
+      if (resposta.nextDecisionPath) {
+        setDecisionPath(resposta.nextDecisionPath)
+      }
 
       setMessages((current) => [
         ...current,
@@ -340,6 +362,31 @@ export default function App() {
       event.preventDefault()
       sendMessage(input)
     }
+  }
+
+  if (isRegisteringEdital) {
+    return (
+      <EditalRegistration
+        key={editingEdital?.id ?? "new-edital"}
+        edital={editingEdital}
+        onBack={() => {
+          setIsRegisteringEdital(false)
+          setEditingEdital(null)
+        }}
+        onCreated={(edital) => {
+          setEditais((current) => [edital, ...current.filter((item) => item.id !== edital.id)])
+          const option: NoticeOption = {
+            value: String(edital.id),
+            short: `Edital ${edital.número}`,
+            label: `Edital ${edital.número} — ${edital.título}`,
+            fullLabel: edital.título,
+            pdfUrl: "https://www.ifb.edu.br/processos-seletivos/editais",
+          }
+          setNoticesList((current) => [option, ...current.filter((item) => item.value !== option.value)])
+          setSelectedNotice(String(edital.id))
+        }}
+      />
+    )
   }
 
   return (
@@ -387,6 +434,30 @@ export default function App() {
             </label>
 
             <div className="header-actions">
+              <button
+                className="header-btn header-btn--admin"
+                onClick={() => {
+                  setEditingEdital(null)
+                  setIsRegisteringEdital(true)
+                }}
+                type="button"
+              >
+                <AddIcon />
+                <span>Cadastrar edital</span>
+              </button>
+              <button
+                className="header-btn header-btn--admin"
+                disabled={!activeEdital}
+                onClick={() => {
+                  setEditingEdital(activeEdital)
+                  setIsRegisteringEdital(true)
+                }}
+                title={activeEdital ? `Editar ${activeNotice.short}` : "Selecione um edital cadastrado para editar"}
+                type="button"
+              >
+                <EditIcon />
+                <span>Editar edital</span>
+              </button>
               <a
                 aria-label={`Baixar PDF do ${activeNotice.short}`}
                 className="header-btn header-btn--pdf"

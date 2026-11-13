@@ -20,6 +20,28 @@ export interface Edital {
   comprovacao_reserva_vagas: string
   matricula: string
   disposicoes_finais: string
+  mensagem_inicial?: string
+  arvore_decisao?: NoDecisao
+}
+
+export interface OpcaoDecisao {
+  id: string
+  titulo: string
+  entradas: string[]
+  resposta: string
+  submenu: NoDecisao | null
+  voltarAoMenuPrincipal: boolean
+}
+
+export interface NoDecisao {
+  id: string
+  mensagem: string
+  opcoes: OpcaoDecisao[]
+}
+
+export type CriarEditalInput = Omit<Edital, "id"> & {
+  mensagem_inicial: string
+  arvore_decisao: NoDecisao
 }
 
 export interface Contato {
